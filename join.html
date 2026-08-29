@@ -83,6 +83,9 @@ function showView(v){ ['view-consent','view-pin','view-declined-fake','view-live
 function showEnded(title, body){ $('ended-title').textContent=title; $('ended-body').textContent=body; showView('view-ended'); }
 
 function renderChat(boxEl, messages, myRole){
+  const sig = JSON.stringify(messages);
+  if(boxEl.dataset.sig === sig) return; // nothing new — don't touch the DOM, it steals focus from the input on Android
+  boxEl.dataset.sig = sig;
   if(!messages.length){ boxEl.innerHTML = '<div class="chat-empty">No messages yet.</div>'; return; }
   const wasAtBottom = boxEl.scrollTop + boxEl.clientHeight >= boxEl.scrollHeight - 10;
   boxEl.innerHTML = messages.map(m =>
