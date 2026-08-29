@@ -155,5 +155,22 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({ data: raw ? JSON.parse(raw) : null });
   }
 
+  if (op === "chat-send") {
+    const { from, text } = req.body;
+    if (!text || !text.trim())
+      return res.status(400).json({ error: "empty message" });
+    const msg = { from, text: text.trim().slice(0, 500), ts: Date.now() };
+    await redis.rpush(`sc:${id}:chat`, JSON.stringify(msg));
+    await redis.ltrim(`sc:${id}:chat`, -200, -1);
+    await redis.expire(`sc:${id}:chat`, TTL);
+    return res.status(200).json({ ok: true });
+  }
+  if (op === "chat-get") {
+    const list = await redis.lrange(`sc:${id}:chat`, 0, -1);
+    return res
+      .status(200)
+      .json({ messages: (list || []).map((x) => JSON.parse(x)) });
+  }
+
   return res.status(400).json({ error: "unknown op" });
 };
