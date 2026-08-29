@@ -47,6 +47,8 @@
       <div class="status-line"><span class="dot live" id="live-dot"></span><span id="live-status-text">SHARING — LIVE</span></div>
       <div class="vbox"><video id="local-video" autoplay playsinline muted></video><div class="vlabel">YOUR CAMERA</div></div>
       <p style="margin-bottom:14px;">They can now see this feed and your location. Stop anytime — it ends immediately on their side too.</p>
+      <div class="chat-box" id="guest-chat-box"><div class="chat-empty">No messages yet.</div></div>
+      <div class="chat-input-row"><input type="text" id="guest-chat-input" placeholder="Send a message…"><button class="chat-send-btn" id="guest-chat-send">Send</button></div>
       <button class="btn btn-danger" id="btn-stop">Stop sharing</button>
     </div>
   </div>
@@ -79,6 +81,15 @@ async function api(op, body={}){
 
 function showView(v){ ['view-consent','view-pin','view-declined-fake','view-live','view-ended'].forEach(x => $(x).classList.toggle('hidden', x!==v)); }
 function showEnded(title, body){ $('ended-title').textContent=title; $('ended-body').textContent=body; showView('view-ended'); }
+
+function renderChat(boxEl, messages, myRole){
+  if(!messages.length){ boxEl.innerHTML = '<div class="chat-empty">No messages yet.</div>'; return; }
+  const wasAtBottom = boxEl.scrollTop + boxEl.clientHeight >= boxEl.scrollHeight - 10;
+  boxEl.innerHTML = messages.map(m =>
+    `<div class="chat-msg ${m.from===myRole ? 'mine':'theirs'}">${m.text.replace(/</g,'&lt;')}</div>`
+  ).join('');
+  if(wasAtBottom) boxEl.scrollTop = boxEl.scrollHeight;
+}
 
 if(!id){
   showEnded('Link not found.', 'This check-in link is missing its code.');
@@ -188,7 +199,21 @@ function startShare(duress){
       }
       lastCandIdx = cands.length;
     }
+
+    if(!duress){
+      const { messages } = await api('chat-get');
+      renderChat($('guest-chat-box'), messages || [], 'guest');
+    }
   }, 1800);
+}
+
+$('guest-chat-send').addEventListener('click', sendGuestChat);
+$('guest-chat-input').addEventListener('keydown', (e) => { if(e.key === 'Enter') sendGuestChat(); });
+async function sendGuestChat(){
+  const text = $('guest-chat-input').value.trim();
+  if(!text) return;
+  $('guest-chat-input').value = '';
+  await api('chat-send', { from:'guest', text });
 }
 
 $('btn-stop').addEventListener('click', async () => {

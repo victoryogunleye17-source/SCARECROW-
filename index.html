@@ -55,6 +55,9 @@
         <div id="host-live" class="hidden">
           <div class="vbox"><video id="host-remote-video" autoplay playsinline></video><div class="vempty" id="host-remote-empty">Waiting for them to accept…</div><div class="vlabel hidden" id="host-remote-label">THEIR CAMERA</div></div>
           <div class="loc-card"><div class="loc-label">THEIR LOCATION</div><div class="loc-val" id="host-loc-theirs">—</div><a class="maplink hidden" id="host-loc-theirs-link" target="_blank" rel="noopener">open map ↗</a></div>
+          <div class="loc-label">MESSAGES</div>
+          <div class="chat-box" id="host-chat-box"><div class="chat-empty">No messages yet.</div></div>
+          <div class="chat-input-row"><input type="text" id="host-chat-input" placeholder="Send a message…"><button class="chat-send-btn" id="host-chat-send">Send</button></div>
           <button class="btn btn-danger" id="host-end">End check-in</button>
         </div>
       </div>
@@ -111,6 +114,15 @@ async function authApi(action, body={}){
 
 function mapLink(lat,lng){ return `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=16/${lat}/${lng}`; }
 function fmtCoord(lat,lng,acc){ return `${lat.toFixed(5)}, ${lng.toFixed(5)}\n±${Math.round(acc)}m`; }
+
+function renderChat(boxEl, messages, myRole){
+  if(!messages.length){ boxEl.innerHTML = '<div class="chat-empty">No messages yet.</div>'; return; }
+  const wasAtBottom = boxEl.scrollTop + boxEl.clientHeight >= boxEl.scrollHeight - 10;
+  boxEl.innerHTML = messages.map(m =>
+    `<div class="chat-msg ${m.from===myRole ? 'mine':'theirs'}">${m.text.replace(/</g,'&lt;')}</div>`
+  ).join('');
+  if(wasAtBottom) boxEl.scrollTop = boxEl.scrollHeight;
+}
 
 function showView(id){
   ['view-login','view-dash','view-ended'].forEach(v => $(v).classList.toggle('hidden', v!==id));
@@ -287,8 +299,19 @@ async function startWatch(id){
         l.href = mapLink(loc.lat, loc.lng);
         l.classList.remove('hidden');
       }
+      const { messages } = await api('chat-get', { id });
+      renderChat($('host-chat-box'), messages || [], 'host');
     }
   }, 1800);
+}
+
+$('host-chat-send').addEventListener('click', sendHostChat);
+$('host-chat-input').addEventListener('keydown', (e) => { if(e.key === 'Enter') sendHostChat(); });
+async function sendHostChat(){
+  const text = $('host-chat-input').value.trim();
+  if(!text || !currentId) return;
+  $('host-chat-input').value = '';
+  await api('chat-send', { id: currentId, from:'host', text });
 }
 
 $('host-end').addEventListener('click', async () => {
