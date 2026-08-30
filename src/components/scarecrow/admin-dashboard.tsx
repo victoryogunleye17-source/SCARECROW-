@@ -38,11 +38,9 @@ type Who = Awaited<ReturnType<typeof whoamiFn>>;
 
 export function AdminDashboard({ initial }: { initial: Who }) {
   const [who, setWho] = useState(initial);
-  const [view, setView] = useState<"login" | "dash" | "ended">(
+  const [view, setView] = useState<"login" | "dash">(
     initial.authed ? "dash" : "login",
   );
-  const [endedTitle, setEndedTitle] = useState("Check-in ended.");
-  const [endedBody, setEndedBody] = useState("");
 
   return (
     <AppShell kicker="ADMIN">
@@ -54,19 +52,6 @@ export function AdminDashboard({ initial }: { initial: Who }) {
             setView("dash");
           }}
         />
-      ) : view === "ended" ? (
-        <Card>
-          <StatusLine tone="off">ENDED</StatusLine>
-          <h1 className="mb-2 text-balance text-[22px] font-bold leading-snug tracking-[-0.01em]">
-            {endedTitle}
-          </h1>
-          <p className="mb-4 text-pretty text-[14.5px] leading-normal text-muted">
-            {endedBody}
-          </p>
-          <Button variant="ghost" onClick={() => setView("dash")}>
-            Back to dashboard
-          </Button>
-        </Card>
       ) : (
         <Dash
           who={who}
@@ -74,11 +59,6 @@ export function AdminDashboard({ initial }: { initial: Who }) {
             await logoutFn();
             setWho(await whoamiFn());
             setView("login");
-          }}
-          onEnded={(title, body) => {
-            setEndedTitle(title);
-            setEndedBody(body);
-            setView("ended");
           }}
         />
       )}
@@ -172,22 +152,22 @@ function LoginForm({
   );
 }
 
+type ActiveSession = { id: string; link: string };
+
 function Dash({
   who,
   onLogout,
-  onEnded,
 }: {
   who: Who;
   onLogout: () => void;
-  onEnded: (title: string, body: string) => void;
 }) {
   const [duration, setDuration] = useState<DurationHours>(4);
   const [normalPin, setNormalPin] = useState("");
   const [duressPin, setDuressPin] = useState("");
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState<HistoryRecord[]>([]);
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [link, setLink] = useState("");
+  const [sessions, setSessions] = useState<ActiveSession[]>([]);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   async function refreshHistory() {
     const res = await historyListFn();
@@ -215,8 +195,14 @@ function Dash({
       return;
     }
     const nextLink = `${window.location.origin}/join?s=${res.id}`;
-    setSessionId(res.id);
-    setLink(nextLink);
+    setSessions((prev) => [{ id: res.id, link: nextLink }, ...prev]);
+    setExpandedId(res.id);
+    void refreshHistory();
+  }
+
+  function closeSession(id: string) {
+    setSessions((prev) => prev.filter((s) => s.id !== id));
+    setExpandedId((cur) => (cur === id ? null : cur));
     void refreshHistory();
   }
 
@@ -294,13 +280,28 @@ function Dash({
         </Button>
       </Card>
 
-      {sessionId ? (
-        <HostPanel
-          id={sessionId}
-          link={link}
-          onEnded={onEnded}
-          onHistory={() => void refreshHistory()}
-        />
+      {sessions.length > 0 ? (
+        <Card>
+          <div className="mb-2.5 flex items-center justify-between">
+            <h2 className="m-0 text-[15px] font-bold">
+              Active check-ins ({sessions.length})
+            </h2>
+          </div>
+          <div className="flex flex-col gap-2.5">
+            {sessions.map((s) => (
+              <HostPanel
+                key={s.id}
+                id={s.id}
+                link={s.link}
+                expanded={expandedId === s.id}
+                onToggle={() =>
+                  setExpandedId((cur) => (cur === s.id ? null : s.id))
+                }
+                onClose={() => closeSession(s.id)}
+              />
+            ))}
+          </div>
+        </Card>
       ) : null}
 
       <Button variant="ghost" onClick={() => void onLogout()}>
@@ -410,13 +411,15 @@ function HistoryRow({ rec }: { rec: HistoryRecord }) {
 function HostPanel({
   id,
   link,
-  onEnded,
-  onHistory,
+  expanded,
+  onToggle,
+  onClose,
 }: {
   id: string;
   link: string;
-  onEnded: (title: string, body: string) => void;
-  onHistory: () => void;
+  expanded: boolean;
+  onToggle: () => void;
+  onClose: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   const [live, setLive] = useState(false);
@@ -426,6 +429,7 @@ function HostPanel({
   const [dropped, setDropped] = useState(false);
   const [remainingMs, setRemainingMs] = useState(0);
   const [hasVideo, setHasVideo] = useState(false);
+  const [closedNote, setClosedNote] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const remoteStream = useRef<MediaStream | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -447,20 +451,20 @@ function HostPanel({
 
       if (snap.status.value === "declined") {
         teardown();
-        onHistory();
-        onEnded("Declined.", "They declined this check-in. Nothing was shared.");
+        setClosedNote("They declined this check-in. Nothing was shared.");
+        window.setTimeout(() => onClose(), 2000);
         return;
       }
       if (snap.status.value === "ended") {
         teardown();
-        onHistory();
         const body =
           snap.status.endedBy === "guest"
             ? "They stopped sharing."
             : snap.status.endedBy === "expiry"
               ? "The trip timer ended this session. Last known location is kept for 24 hours."
               : "This session is closed.";
-        onEnded("Check-in ended.", body);
+        setClosedNote(body);
+        window.setTimeout(() => onClose(), 2000);
         return;
       }
 
@@ -505,10 +509,10 @@ function HostPanel({
   }, [id]);
 
   useEffect(() => {
-    if (live && videoRef.current && remoteStream.current) {
+    if (live && expanded && videoRef.current && remoteStream.current) {
       videoRef.current.srcObject = remoteStream.current;
     }
-  }, [live, hasVideo]);
+  }, [live, hasVideo, expanded]);
 
   function teardown() {
     connecting.current = false;
@@ -540,111 +544,77 @@ function HostPanel({
             ? "CONNECTING…"
             : "WAITING FOR LINK TO OPEN";
 
+  if (closedNote) {
+    return (
+      <div className="rounded-md border border-border bg-surface-2 px-3.5 py-3 text-[13px] leading-normal text-muted">
+        {closedNote}
+      </div>
+    );
+  }
+
   return (
-    <Card>
-      <StatusLine tone={tone}>{statusText}</StatusLine>
+    <div className="rounded-md border border-border bg-surface-2">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center justify-between gap-2.5 px-3.5 py-3 text-left"
+      >
+        <div className="min-w-0 flex-1">
+          <StatusLine tone={tone}>{statusText}</StatusLine>
+          <div className="mt-1 font-mono text-[10.5px] text-muted">
+            {id.slice(0, 8)}…
+          </div>
+        </div>
+        <span className="shrink-0 font-mono text-[11px] text-muted">
+          {expanded ? "▲ hide" : "▼ view"}
+        </span>
+      </button>
 
-      {!live ? (
-        <>
-          <p className="mb-4 text-pretty text-[14.5px] leading-normal text-muted">
-            Send this link to the person you want to check on. Nothing shares
-            until they accept. Ask them to keep the page in the foreground for
-            the whole trip.
-          </p>
-          <div className="mb-3 flex items-center gap-2 rounded-md border border-border bg-surface-2 px-3 py-2.5">
-            <input
-              readOnly
-              value={link}
-              className="min-w-0 flex-1 border-0 bg-transparent font-mono text-xs text-fg outline-none"
-            />
-            <Button
-              variant="ghost"
-              size="compact"
-              className="w-auto"
-              onClick={() => {
-                void navigator.clipboard.writeText(link).then(() => {
-                  setCopied(true);
-                  window.setTimeout(() => setCopied(false), 1500);
-                });
-              }}
-            >
-              {copied ? "Copied" : "Copy"}
-            </Button>
-          </div>
-          <div className="rounded-md border border-dashed border-border bg-surface-2 px-3.5 py-3 text-[13px] leading-normal text-fg">
-            Tap this link to share your live camera and location with me for a
-            safety check-in — nothing turns on until you accept: {link}
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="relative mb-3.5 aspect-[3/4] overflow-hidden rounded-md border border-border bg-bg">
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              className="size-full object-cover"
-            />
-            {!hasVideo ? (
-              <div className="absolute inset-0 flex items-center justify-center px-2.5 text-center font-mono text-[11px] text-muted">
-                Waiting for them to accept…
+      {expanded ? (
+        <div className="border-t border-border px-3.5 py-3.5">
+          {!live ? (
+            <>
+              <p className="mb-4 text-pretty text-[14.5px] leading-normal text-muted">
+                Send this link to the person you want to check on. Nothing
+                shares until they accept. Ask them to keep the page in the
+                foreground for the whole trip.
+              </p>
+              <div className="mb-3 flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2.5">
+                <input
+                  readOnly
+                  value={link}
+                  className="min-w-0 flex-1 border-0 bg-transparent font-mono text-xs text-fg outline-none"
+                />
+                <Button
+                  variant="ghost"
+                  size="compact"
+                  className="w-auto"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(link).then(() => {
+                      setCopied(true);
+                      window.setTimeout(() => setCopied(false), 1500);
+                    });
+                  }}
+                >
+                  {copied ? "Copied" : "Copy"}
+                </Button>
               </div>
-            ) : (
-              <div className="absolute bottom-2 left-2 rounded bg-bg/70 px-1.5 py-0.5 font-mono text-[10px] tracking-[0.06em]">
-                THEIR CAMERA
+              <div className="rounded-md border border-dashed border-border bg-surface px-3.5 py-3 text-[13px] leading-normal text-fg">
+                Tap this link to share your live camera and location with me
+                for a safety check-in — nothing turns on until you accept:{" "}
+                {link}
               </div>
-            )}
-          </div>
-
-          <div className="mb-3.5 rounded-md border border-border bg-surface-2 px-3.5 py-3">
-            <div className="mb-1 font-mono text-[10px] tracking-[0.1em] text-muted">
-              THEIR LOCATION
-            </div>
-            <div className="font-mono text-[13px] text-fg">
-              {location
-                ? fmtCoord(location.lat, location.lng, location.acc)
-                : "—"}
-            </div>
-            {location ? (
-              <a
-                className="mt-1.5 inline-block font-mono text-[11.5px] text-accent no-underline"
-                href={mapLink(location.lat, location.lng)}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                open map
-              </a>
-            ) : null}
-            <div className="mt-1 font-mono text-[11px] text-muted">
-              Last fix {fmtAgo(location?.ts ?? status?.lastHeartbeatAt)}
-              {dropped ? " · phone may be off or the page left the foreground" : ""}
-            </div>
-          </div>
-
-          <ChatBox
-            messages={messages}
-            myRole="host"
-            onSend={async (text) => {
-              await chatSendFn({ data: { id, text } });
-            }}
-          />
-
-          <Button
-            variant="danger"
-            onClick={async () => {
-              await endSessionFn({ data: { id } });
-              teardown();
-              onHistory();
-              onEnded(
-                "Check-in ended.",
-                "You ended the session. Last known location is kept for 24 hours.",
-              );
-            }}
-          >
-            End check-in
-          </Button>
-        </>
-      )}
-    </Card>
-  );
-}
+            </>
+          ) : (
+            <>
+              <div className="relative mb-3.5 aspect-[3/4] overflow-hidden rounded-md border border-border bg-bg">
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  className="size-full object-cover"
+                />
+                {!hasVideo ? (
+                  <div className="absolute inset-0 flex items-center justify-center px-2.5 text-center font-mono text-[11px] text-muted">
+                    Waiting for them to accept…
+         
