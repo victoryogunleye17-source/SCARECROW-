@@ -562,11 +562,11 @@ function HostPanel({
         <div className="min-w-0 flex-1">
           <StatusLine tone={tone}>{statusText}</StatusLine>
           <div className="mt-1 font-mono text-[10.5px] text-muted">
-            {id.slice(0, 8)}…
+            {id.slice(0, 8)}
           </div>
         </div>
         <span className="shrink-0 font-mono text-[11px] text-muted">
-          {expanded ? "▲ hide" : "▼ view"}
+          {expanded ? "Hide" : "View"}
         </span>
       </button>
 
@@ -616,5 +616,5 @@ function HostPanel({
                 />
                 {!hasVideo ? (
                   <div className="absolute inset-0 flex items-center justify-center px-2.5 text-center font-mono text-[11px] text-muted">
-                    Waiting for them to accept…
-         
+                    Waiting for them to accept...
+            
